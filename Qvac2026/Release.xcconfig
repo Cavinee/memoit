@@ -1,0 +1,2 @@
+#include? "Pods/Target Support Files/Pods-qvac2026/Pods-qvac2026.release.xcconfig"
+#include? "Local.xcconfig"

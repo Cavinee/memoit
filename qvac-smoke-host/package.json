@@ -1,0 +1,28 @@
+{
+  "name": "qvac-smoke-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate-smoke-host.mjs",
+    "ios:device": "bash scripts/install-on-iphone.sh",
+    "ios:uninstall": "bash scripts/uninstall-from-iphone.sh",
+    "prebuild": "npx expo prebuild",
+    "start": "npx expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@qvac/sdk": "latest",
+    "expo": "~54.0.0",
+    "expo-build-properties": "~1.0.10",
+    "expo-device": "~8.0.10",
+    "expo-file-system": "~19.0.23",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-bare-kit": "^0.11.5"
+  },
+  "devDependencies": {
+    "bare-pack": "^1.5.1"
+  }
+}

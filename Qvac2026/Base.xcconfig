@@ -1,0 +1,2 @@
+PODS_ROOT = $(SRCROOT)/Pods
+#include? "Local.xcconfig"

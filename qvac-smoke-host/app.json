@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "QVAC Smoke Host",
+    "slug": "qvac-smoke-host",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "dev.qvac.smokehost",
+      "deploymentTarget": "17.0",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "17.0"
+          },
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ],
+      "@qvac/sdk/expo-plugin"
+    ]
+  }
+}
