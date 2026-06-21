@@ -268,6 +268,7 @@ final class KnowledgeRuntimeService {
             let runtimeNote = try workflow.save(into: runtime)
 
             refreshUserSearchIndex()
+            scheduleEmbeddingBackfill()
             try rememberMapping(noteID: runtimeNote.id, appID: id)
             if pinned && !runtimeNote.isPinned {
                 let pinnedRuntimeNote = try updatedRuntimeNote(from: runtime.execute(.setPinnedNote(.init(
@@ -312,6 +313,7 @@ final class KnowledgeRuntimeService {
                 _ = try mirror(runtimeNote)
             }
             refreshUserSearchIndex()
+            scheduleEmbeddingBackfill()
         } catch {
             print("KnowledgeRuntimeService moveToTrash error: \(error)")
         }
@@ -328,6 +330,7 @@ final class KnowledgeRuntimeService {
                 _ = try mirror(runtimeNote)
             }
             refreshUserSearchIndex()
+            scheduleEmbeddingBackfill()
         } catch {
             print("KnowledgeRuntimeService restoreFromTrash error: \(error)")
         }
@@ -344,6 +347,7 @@ final class KnowledgeRuntimeService {
                 deletionConfirmation: DeletionConfirmation(noteID: noteID)
             )))
             refreshUserSearchIndex()
+            scheduleEmbeddingBackfill()
             database.notes.permanentlyDelete(id: try appID(for: noteID))
             try forgetMapping(noteID: noteID)
         } catch {
@@ -364,6 +368,9 @@ final class KnowledgeRuntimeService {
 
         refreshPresentationMirror()
         refreshUserSearchIndex()
+        // Backfill embeddings once after hydrate so existing notes get embedded off the
+        // main thread; subsequent note mutations each schedule their own backfill.
+        scheduleEmbeddingBackfill()
     }
 
     private func mirror(
@@ -461,12 +468,50 @@ final class KnowledgeRuntimeService {
         return note
     }
 
+    // Rebuilds ONLY the lexical user-search index, synchronously on the main actor.
+    // This is the cheap freshness pass the answer path gates on, so it must stay
+    // inline. Crucially it uses `.lexicalOnly`, so it never triggers the embedding
+    // provider's blocking `embed()` — whose worklet reply is delivered on the main
+    // queue and would deadlock if called from the main thread. The embedding index is
+    // (re)built separately and off the main thread via `scheduleEmbeddingBackfill()`.
     private func refreshUserSearchIndex() {
         do {
             let runtime = try requireRuntime()
-            _ = try runtime.execute(.runIndexingJobs(.init()))
+            _ = try runtime.execute(.runIndexingJobs(.init(scope: .lexicalOnly)))
         } catch {
             print("KnowledgeRuntimeService refreshUserSearchIndex error: \(error)")
+        }
+    }
+
+    // Serial background queue that runs the embedding backfill. Serial so concurrent
+    // backfills (e.g. several quick saves) are coalesced into a sequence rather than
+    // racing; only one `embeddingOnly` rebuild touches the provider/store at a time.
+    private let embeddingIndexingQueue = DispatchQueue(label: "com.qvac.embedding-indexing")
+
+    // Rebuilds ONLY the embedding index, OFF the main thread. The production provider's
+    // `embed()` blocks on the worklet, whose reply is delivered on the main queue, so it
+    // MUST NOT run on the main thread — dispatching here onto a background queue is what
+    // keeps the worklet round-trip from deadlocking against the main-queue reply.
+    //
+    // Concurrency safety of this off-main pass:
+    //  - The embedding index itself is lock-protected (Part A): this background rebuild
+    //    publishes `records`/`isReady` under a lock, so a concurrent `answerAsync`
+    //    (which reads the index on its own background queue) snapshots it safely.
+    //  - The SQLite note store is opened FULLMUTEX, so the background `listNotes()` this
+    //    pass performs is safe against main-actor note writes. The view is eventually
+    //    consistent: a note added mid-backfill is embedded on the NEXT backfill, which
+    //    its own save schedules — so nothing is permanently missed.
+    //  - The embedding store's contentHash staleness check means only changed notes
+    //    actually re-embed, so calling this after every note mutation is cheap (unchanged
+    //    notes reuse their stored vectors). This could be coalesced/debounced later if the
+    //    per-mutation listNotes()+loadAll() ever shows up in a profile.
+    //
+    // `runtime` is captured directly (not via `self`/the main actor) so the closure does
+    // not hop back onto the main actor; the runtime command runs entirely off-main.
+    private func scheduleEmbeddingBackfill() {
+        guard let runtime else { return }
+        embeddingIndexingQueue.async {
+            try? runtime.execute(.runIndexingJobs(.init(scope: .embeddingOnly)))
         }
     }
 
@@ -526,7 +571,10 @@ final class KnowledgeRuntimeService {
         )
         return try RuntimeCoreHarness.makeSQLiteBacked(
             storageURL: runtimeStorageURL(),
-            aiRuntimeAdapter: adapter
+            aiRuntimeAdapter: adapter,
+            // Only the real-device branch has a worklet to reach; the simulator and
+            // non-Expo branches must stay on the lexical fallback (no worklet there).
+            noteEmbeddingProvider: ProductionNoteEmbeddingProvider()
         )
         #else
         return try RuntimeCoreHarness.makeSQLiteBacked(

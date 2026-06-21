@@ -11,13 +11,29 @@ final class NoteEmbeddingIndex {
         let norm: Float
     }
 
+    /// Guards `records` and `_isReady` so a background embedding rebuild (`rebuild` on
+    /// the app's serial embedding queue) and a concurrent answer reading the index
+    /// (`search` / `isReady` on `answerAsync`'s background queue) never touch the Swift
+    /// array at the same time. Held only to PUBLISH or SNAPSHOT — never around the slow
+    /// embedding/store work — so a reader is not blocked for the whole backfill. The
+    /// invariant it enforces: `records` and `_isReady` are published together, so a
+    /// reader never observes `isReady == true` with stale/empty `records`.
+    private let lock = NSLock()
+    // Mutate `records` ONLY by building a fresh array and handing it to `publish(_:)`;
+    // never mutate the published array in place. That is what keeps the slow embedding
+    // work outside the lock and the records/_isReady publish atomic.
     private var records: [Record] = []
+    private var _isReady = false
 
     /// Whether the embedding index has been built at least once. Retrieval gates
     /// semantic search on this so that, during first-run backfill (provider set but
     /// no embedding rebuild yet), the runtime falls back to the lexical index instead
-    /// of returning nothing.
-    private(set) var isReady = false
+    /// of returning nothing. Read under the lock so it is consistent with `records`.
+    var isReady: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isReady
+    }
 
     func rebuild(from notes: [Note], provider: NoteEmbeddingProvider) throws {
         try rebuild(from: notes, provider: provider, store: nil, modelID: provider.modelID)
@@ -29,11 +45,13 @@ final class NoteEmbeddingIndex {
     /// notes are embedded and upserted; rows for notes no longer present are dropped.
     func rebuild(from notes: [Note], provider: NoteEmbeddingProvider, store: (any NoteEmbeddingStore)?, modelID: String) throws {
         guard let store else {
-            records = try notes.map { note in
+            // Slow embedding work happens outside the lock so readers are not blocked
+            // for the whole backfill; only the final publish takes the lock.
+            let newRecords = try notes.map { note -> Record in
                 let vector = try provider.embed(Self.embeddingInput(for: note))
                 return Record(noteID: note.id, vector: vector, norm: Self.norm(vector))
             }
-            isReady = true
+            publish(newRecords)
             return
         }
 
@@ -59,8 +77,17 @@ final class NoteEmbeddingIndex {
         }
 
         try store.deleteAll(exceptNoteIDs: Set(notes.map(\.id)))
+        // All slow embedding/store work is done; publish records + readiness together.
+        publish(newRecords)
+    }
+
+    /// Atomically publishes a freshly built record set and marks the index ready, so a
+    /// concurrent reader never sees `isReady == true` paired with stale/empty `records`.
+    private func publish(_ newRecords: [Record]) {
+        lock.lock()
         records = newRecords
-        isReady = true
+        _isReady = true
+        lock.unlock()
     }
 
     private static func embeddingInput(for note: Note) -> String {
@@ -85,7 +112,13 @@ final class NoteEmbeddingIndex {
         let queryNorm = Self.norm(queryVector)
         guard queryNorm > 0 else { return [] }
 
-        let scored: [(noteID: NoteID, score: Float)] = records.compactMap { record in
+        // Snapshot under the lock, then release it before scoring so the cosine math
+        // does not block a concurrent rebuild's publish (and vice versa).
+        lock.lock()
+        let snapshot = records
+        lock.unlock()
+
+        let scored: [(noteID: NoteID, score: Float)] = snapshot.compactMap { record in
             guard record.norm > 0 else { return nil }
             let score = Self.dot(record.vector, queryVector) / (record.norm * queryNorm)
             return score >= threshold ? (record.noteID, score) : nil
