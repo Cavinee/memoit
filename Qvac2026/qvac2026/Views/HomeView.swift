@@ -31,7 +31,7 @@ struct HomeView: View {
                             ZStack {
                                 NavigationLink(value: NoteRoute.existing(note)) { EmptyView() }
                                     .opacity(0)
-                                NoteCard(note: note)
+                                NoteCard(note: note, onFindRelated: { vm.findRelated(note) })
                             }
                             .listRowInsets(EdgeInsets(top: 5, leading: 20, bottom: 5, trailing: 20))
                             .listRowSeparator(.hidden)
@@ -67,6 +67,9 @@ struct HomeView: View {
         }
         .background(AppBackground())
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $vm.relatedResult) { result in
+            RelatedNotesSheet(result: result)
+        }
         .onAppear { vm.refresh() }
         .task(id: refreshTick) {
             vm.refresh()

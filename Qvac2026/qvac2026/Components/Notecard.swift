@@ -10,6 +10,7 @@ import UIKit
 
 struct NoteCard: View {
     let note: Note
+    var onFindRelated: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 14) {
@@ -48,12 +49,19 @@ struct NoteCard: View {
     }
 
     private var moreButton: some View {
-        Button(action: {}) {
+        Menu {
+            Button {
+                onFindRelated()
+            } label: {
+                Label("Find Related Notes", systemImage: "sparkles")
+            }
+        } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.secondary)
                 .rotationEffect(.degrees(90))
                 .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

@@ -70,6 +70,9 @@ struct NoteEditorBody: View {
         } message: {
             Text(state.saveErrorMessage)
         }
+        .sheet(item: $state.relatedResult) { result in
+            RelatedNotesSheet(result: result)
+        }
         // v1 text-first: photo picker and camera capture entry points are disabled.
         // .photosPicker(isPresented: $state.showPhotoPicker, selection: $state.selectedPhotos, matching: .images)
         // .onChange(of: state.selectedPhotos) { _, items in
@@ -158,6 +161,9 @@ struct NoteEditorBody: View {
                         Button { state.renameText = state.noteTitle; state.showRename = true } label: {
                             Label("Rename", systemImage: "pencil")
                         }
+                        Button { state.findRelated() } label: {
+                            Label("Find Related Notes", systemImage: "sparkles")
+                        }
                         Divider()
                         Button(role: .destructive) {
                             onMoveToTrash()
@@ -203,7 +209,7 @@ struct NoteEditorBody: View {
             RichTextEditor(controller: state.editor) {
                 NoteKeyboardToolbar(state: state)
             }
-            .frame(minHeight: 200)
+            .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
             .onAppear {
                 state.editor.onMentionTrigger = {
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {

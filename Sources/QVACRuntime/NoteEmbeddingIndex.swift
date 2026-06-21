@@ -130,6 +130,33 @@ final class NoteEmbeddingIndex {
             .map { $0.noteID }
     }
 
+    /// Note IDs most similar to `noteID`'s OWN stored embedding, most-similar first,
+    /// capped to `topK` and filtered to cosine score >= `threshold`. Excludes `noteID`
+    /// itself. Returns [] if the note has no embedding in the index yet. Reuses the
+    /// already-computed vectors, so it never re-embeds (no worklet round-trip).
+    func relatedNoteIDs(to noteID: NoteID, topK: Int, threshold: Float) -> [NoteID] {
+        // Snapshot under the lock, then release it before scoring so the cosine math
+        // does not block a concurrent rebuild's publish (and vice versa).
+        lock.lock()
+        let snapshot = records
+        lock.unlock()
+
+        guard let anchor = snapshot.first(where: { $0.noteID == noteID }), anchor.norm > 0 else {
+            return []
+        }
+
+        let scored: [(noteID: NoteID, score: Float)] = snapshot.compactMap { record in
+            guard record.noteID != noteID, record.norm > 0 else { return nil }
+            let score = Self.dot(record.vector, anchor.vector) / (record.norm * anchor.norm)
+            return score >= threshold ? (record.noteID, score) : nil
+        }
+
+        return scored
+            .sorted { $0.score > $1.score }
+            .prefix(topK)
+            .map { $0.noteID }
+    }
+
     private static func dot(_ a: [Float], _ b: [Float]) -> Float {
         let count = min(a.count, b.count)
         var sum: Float = 0

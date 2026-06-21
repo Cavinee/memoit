@@ -126,6 +126,24 @@ final class KnowledgeRuntimeService {
         }
     }
 
+    /// Notes semantically related to the given note, ranked most-similar first.
+    /// Backed by on-device embedding similarity (no generation worklet, no `.qvac`
+    /// model call); returns [] on any error so the UI degrades gracefully.
+    func relatedNotes(to id: UUID) -> [Note] {
+        ensureHydrated()
+        do {
+            let runtime = try requireRuntime()
+            let noteID = try runtimeNoteID(for: id)
+            guard case .relatedNotes(let runtimeNotes) = try runtime.query(.relatedNotes(noteID)) else {
+                throw KnowledgeRuntimeServiceError.unexpectedRuntimeResult
+            }
+            return try mirrorRuntimeNotes(runtimeNotes)
+        } catch {
+            print("KnowledgeRuntimeService relatedNotes error: \(error)")
+            return []
+        }
+    }
+
     func trustedGraph() -> PresentationTrustedGraph {
         ensureHydrated()
         do {

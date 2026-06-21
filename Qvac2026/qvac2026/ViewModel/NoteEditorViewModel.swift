@@ -60,6 +60,8 @@ final class NoteEditorViewModel: ObservableObject {
     @Published var showRename    = false
     @Published var renameText    = ""
     @Published var showSaveError = false
+    /// Drives the "Find Related Notes" sheet from the note's 3-dots menu.
+    @Published var relatedResult: RelatedNotesResult?
     /// Drives the inline "@" mention surface (also opened by the link toolbar button).
     @Published var showNoteLinkPicker = false
     /// Drives the inline "/" slash command surface.
@@ -263,7 +265,16 @@ final class NoteEditorViewModel: ObservableObject {
         suppressAutosave = true
         KnowledgeRuntimeService.shared.moveToTrash(id: noteId)
     }
-    
+
+    /// Finds notes related to the open note via on-device embedding similarity and
+    /// presents them in the related-notes sheet. No generation worklet, no `.qvac` path.
+    func findRelated() {
+        relatedResult = RelatedNotesResult(
+            sourceTitle: noteTitle,
+            related: KnowledgeRuntimeService.shared.relatedNotes(to: noteId)
+        )
+    }
+
     // MARK: Attachments
 
     func loadPersistedAttachments() {

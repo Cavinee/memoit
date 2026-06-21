@@ -869,7 +869,9 @@ final class RichTextController: ObservableObject {
     }
 
     private func bodyAttributes(font: UIFont? = nil) -> [NSAttributedString.Key: Any] {
-        [.font: font ?? defaultFont]
+        // `.label` (not a baked-in color) so reconstructed text adapts to light/dark mode;
+        // without an explicit foreground attribute, TextKit 2 renders runs as black.
+        [.font: font ?? defaultFont, .foregroundColor: UIColor.label]
     }
 
     private func wikilinkMentionAttributes(
@@ -1247,10 +1249,15 @@ struct RichTextEditor<Accessory: View>: UIViewRepresentable {
         let tv = UITextView(usingTextLayoutManager: true)
         tv.delegate = context.coordinator
         tv.font = UIFont(name: "HelveticaNeue", size: 15) ?? .systemFont(ofSize: 15)
+        tv.textColor = .label
         tv.backgroundColor = .clear
         tv.isScrollEnabled = false
         tv.textContainerInset = .zero
         tv.textContainer.lineFragmentPadding = 0
+        // Wrap long lines at the view's width instead of growing horizontally: track the
+        // text-view width and don't let a long token force the view wider than its frame.
+        tv.textContainer.widthTracksTextView = true
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tv.attributedText = controller.attributedText
         controller.textView = tv
 

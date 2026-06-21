@@ -27,6 +27,7 @@ public enum RuntimeQuery: Equatable, Sendable {
     case backlinks(NoteID)
     case trustedGraph
     case userSearch(String)
+    case relatedNotes(NoteID)
     case indexFreshness(DerivedIndex)
     case aiReadyDevice
     case aiUnavailableState
@@ -50,6 +51,7 @@ public enum RuntimeQueryResult: Equatable, Sendable {
     case backlinks([Backlink])
     case trustedGraph(TrustedGraph)
     case userSearchResults([Note])
+    case relatedNotes([Note])
     case indexFreshness(IndexFreshness)
     case aiReadyDevice(Bool)
     case aiUnavailableState(AIUnavailableState?)

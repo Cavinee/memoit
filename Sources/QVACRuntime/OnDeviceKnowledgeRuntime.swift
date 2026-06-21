@@ -10,6 +10,10 @@ public final class OnDeviceKnowledgeRuntime {
     private let noteEmbeddingIndex = NoteEmbeddingIndex()
     private static let embeddingSearchTopK = 5
     private static let embeddingSearchThreshold: Float = 0.25
+    // "Find Related Notes" surfaces a few more candidates at a slightly looser bar than
+    // answer-grounding retrieval, since the user is browsing rather than feeding context.
+    private static let relatedNotesTopK = 8
+    private static let relatedNotesThreshold: Float = 0.20
     private let modelInventory: ModelInventoryStore
     private let aiRuntimeAdapter: any AIRuntimeAdapter
     private let aiSessionHistoryStore: AISessionHistoryStore
@@ -485,6 +489,8 @@ public final class OnDeviceKnowledgeRuntime {
         case .userSearch(let query):
             let activeNotesByID = Dictionary(uniqueKeysWithValues: try noteStore.listNotes().map { ($0.id, $0) })
             return .userSearchResults(userSearchIndex.search(query).compactMap { activeNotesByID[$0] })
+        case .relatedNotes(let noteID):
+            return .relatedNotes(try relatedNotes(to: noteID))
         case .indexFreshness(let index):
             switch index {
             case .userSearch:
@@ -518,6 +524,45 @@ public final class OnDeviceKnowledgeRuntime {
         case .diagnosticsExport:
             return .diagnosticsExport(try diagnosticsExport())
         }
+    }
+
+    /// Notes semantically related to `noteID`, ranked most-similar first. Uses the
+    /// note's already-computed embedding via cosine similarity — it never re-embeds and
+    /// never touches the answer/generation worklet. Before the embedding index is built
+    /// (fresh install), it falls back to a lexical search on the note's title so the
+    /// feature still returns something. Excludes the note itself and any placeholders.
+    private func relatedNotes(to noteID: NoteID) throws -> [Note] {
+        let activeNotesByID = Dictionary(uniqueKeysWithValues: try noteStore.listNotes().map { ($0.id, $0) })
+
+        let relatedIDs: [NoteID]
+        if noteEmbeddingIndex.isReady {
+            relatedIDs = noteEmbeddingIndex.relatedNoteIDs(
+                to: noteID,
+                topK: Self.relatedNotesTopK,
+                threshold: Self.relatedNotesThreshold
+            )
+        } else if let note = activeNotesByID[noteID] {
+            // Embedding index not built yet (fresh install). Approximate "related" with a
+            // lexical OR over the note's title tokens — UserSearchIndex.search is AND-only
+            // per query, so a single full-title query would miss partial-overlap notes.
+            let titleTokens = note.title
+                .lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .filter { $0.count > 1 }
+            var seen: Set<NoteID> = [noteID]
+            var ordered: [NoteID] = []
+            for token in titleTokens {
+                for id in userSearchIndex.search(String(token)) where !seen.contains(id) {
+                    seen.insert(id)
+                    ordered.append(id)
+                }
+            }
+            relatedIDs = Array(ordered.prefix(Self.relatedNotesTopK))
+        } else {
+            relatedIDs = []
+        }
+
+        return relatedIDs.compactMap { activeNotesByID[$0] }.filter { !$0.isPlaceholder }
     }
 
     public func answer(_ request: AnswerRequest) throws -> AnswerResult {

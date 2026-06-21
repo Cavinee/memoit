@@ -4874,6 +4874,65 @@ func embeddingPersistenceReembedsWhenEmbeddingModelChanged() throws {
     try expect(spyB.embedCount == 1, "a changed embedding model must invalidate the stored vector and re-embed, not load it")
 }
 
+func relatedNotesQueryRanksSemanticallySimilarNoteAndExcludesItself() throws {
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: FakeEmbeddingProvider())
+
+    let anchor = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Coffee shop recommendation downtown",
+        body: "Try the new café espresso latte near the office downtown.",
+        creationProvenance: .userCreated
+    ))))
+    let similar = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Another café espresso spot",
+        body: "A coffee latte recommendation near the downtown office.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Quarterly tax filing",
+        body: "Submit the accountant invoice spreadsheet before the fiscal deadline.",
+        creationProvenance: .userCreated
+    ))))
+
+    _ = try runtime.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtime.execute(.runIndexingJobs(.init()))
+
+    guard case .relatedNotes(let related) = try runtime.query(.relatedNotes(anchor.id)) else {
+        throw BehaviorTestFailure(description: "expected Related Notes query result")
+    }
+
+    try expect(!related.contains { $0.id == anchor.id }, "related notes must exclude the note itself")
+    try expect(related.first?.id == similar.id, "the most-similar note should rank first in related notes")
+}
+
+func relatedNotesQueryFallsBackToLexicalBeforeEmbeddingIndexIsBuilt() throws {
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: FakeEmbeddingProvider())
+
+    let anchor = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr launch plan",
+        body: "Project Zephyr ships under codename Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    let lexicalMatch = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr retrospective",
+        body: "Lessons from the Zephyr release.",
+        creationProvenance: .userCreated
+    ))))
+
+    // Only the cheap lexical pass runs; the embedding index is never built, so the
+    // related-notes query must fall back to lexical search rather than returning nothing.
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .lexicalOnly)))
+
+    guard case .relatedNotes(let related) = try runtime.query(.relatedNotes(anchor.id)) else {
+        throw BehaviorTestFailure(description: "expected Related Notes query result")
+    }
+
+    try expect(!related.contains { $0.id == anchor.id }, "lexical fallback must still exclude the note itself")
+    try expect(related.contains { $0.id == lexicalMatch.id }, "lexical fallback should surface a title-matching note before embeddings exist")
+}
+
 func embeddingPersistenceDropsTrashedNoteRowAndDoesNotReembedSurvivor() throws {
     let storageURL = temporarySQLiteStorageURL()
     defer { try? FileManager.default.removeItem(at: storageURL) }
@@ -8284,6 +8343,8 @@ let tests: [(String, () async throws -> Void)] = [
     ("noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap", noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap),
     ("embeddingBackfillLexicalOnlyIndexingDoesNotEmbed", embeddingBackfillLexicalOnlyIndexingDoesNotEmbed),
     ("embeddingBackfillUsesLexicalUntilEmbeddingIndexBuilt", embeddingBackfillUsesLexicalUntilEmbeddingIndexBuilt),
+    ("relatedNotesQueryRanksSemanticallySimilarNoteAndExcludesItself", relatedNotesQueryRanksSemanticallySimilarNoteAndExcludesItself),
+    ("relatedNotesQueryFallsBackToLexicalBeforeEmbeddingIndexIsBuilt", relatedNotesQueryFallsBackToLexicalBeforeEmbeddingIndexIsBuilt),
     ("embeddingBackfillEmbeddingOnlyIndexingEnablesSemanticRetrieval", embeddingBackfillEmbeddingOnlyIndexingEnablesSemanticRetrieval),
     ("embeddingBackfillEmbeddingOnlyDoesNotRebuildLexicalFreshness", embeddingBackfillEmbeddingOnlyDoesNotRebuildLexicalFreshness),
     ("embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding", embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding),
