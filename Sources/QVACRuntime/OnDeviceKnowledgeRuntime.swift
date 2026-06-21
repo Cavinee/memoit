@@ -112,10 +112,15 @@ public final class OnDeviceKnowledgeRuntime {
             try graphStore.removeExplicitLinks(involving: command.noteID)
             userSearchIndex.markDirty()
             return .permanentlyDeletedNote(command.noteID)
-        case .runIndexingJobs:
+        case .runIndexingJobs(let command):
             let notes = try noteStore.listNotes()
-            userSearchIndex.rebuild(from: notes)
-            if let noteEmbeddingProvider {
+            // Lexical refresh is cheap and main-thread-safe; the embedding rebuild can
+            // block on a worklet. Scoping lets the app run lexical inline (freshness)
+            // and embedding off the main thread without deadlocking.
+            if command.scope != .embeddingOnly {
+                userSearchIndex.rebuild(from: notes)
+            }
+            if command.scope != .lexicalOnly, let noteEmbeddingProvider {
                 try noteEmbeddingIndex.rebuild(
                     from: notes,
                     provider: noteEmbeddingProvider,
@@ -1218,10 +1223,10 @@ public final class OnDeviceKnowledgeRuntime {
     /// configured, otherwise the lexical UserSearchIndex. The fallback keeps
     /// retrieval working before the embedding model/index is ready.
     private func retrievalSeeds(for prompt: String) throws -> [NoteID] {
-        guard let noteEmbeddingProvider else {
+        guard let provider = noteEmbeddingProvider, noteEmbeddingIndex.isReady else {
             return userSearchIndex.search(prompt)
         }
-        let queryVector = try noteEmbeddingProvider.embed(prompt)
+        let queryVector = try provider.embed(prompt)
         return noteEmbeddingIndex.search(
             queryVector: queryVector,
             topK: Self.embeddingSearchTopK,

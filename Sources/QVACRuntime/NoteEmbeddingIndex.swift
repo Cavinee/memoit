@@ -13,6 +13,12 @@ final class NoteEmbeddingIndex {
 
     private var records: [Record] = []
 
+    /// Whether the embedding index has been built at least once. Retrieval gates
+    /// semantic search on this so that, during first-run backfill (provider set but
+    /// no embedding rebuild yet), the runtime falls back to the lexical index instead
+    /// of returning nothing.
+    private(set) var isReady = false
+
     func rebuild(from notes: [Note], provider: NoteEmbeddingProvider) throws {
         try rebuild(from: notes, provider: provider, store: nil, modelID: provider.modelID)
     }
@@ -27,6 +33,7 @@ final class NoteEmbeddingIndex {
                 let vector = try provider.embed(Self.embeddingInput(for: note))
                 return Record(noteID: note.id, vector: vector, norm: Self.norm(vector))
             }
+            isReady = true
             return
         }
 
@@ -53,6 +60,7 @@ final class NoteEmbeddingIndex {
 
         try store.deleteAll(exceptNoteIDs: Set(notes.map(\.id)))
         records = newRecords
+        isReady = true
     }
 
     private static func embeddingInput(for note: Note) -> String {

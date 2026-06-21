@@ -92,8 +92,22 @@ public struct PermanentlyDeleteNoteCommand: Equatable, Sendable {
     }
 }
 
+/// Which indexes a `runIndexingJobs` command rebuilds. `lexicalOnly` is the cheap,
+/// main-thread "freshness" pass; `embeddingOnly` is the (potentially device-blocking)
+/// semantic pass the app runs off the main thread. `all` rebuilds both and is the
+/// default so existing call sites keep their original behavior.
+public enum IndexingScope: Equatable, Sendable {
+    case all
+    case lexicalOnly
+    case embeddingOnly
+}
+
 public struct RunIndexingJobsCommand: Equatable, Sendable {
-    public init() {}
+    public let scope: IndexingScope
+
+    public init(scope: IndexingScope = .all) {
+        self.scope = scope
+    }
 }
 
 public struct MarkdownExportFile: Equatable, Sendable {

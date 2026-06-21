@@ -4652,6 +4652,113 @@ func noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap() throws 
     ], "semantic match should cite the Zephyr Note")
 }
 
+func embeddingBackfillLexicalOnlyIndexingDoesNotEmbed() throws {
+    // The production embedding provider blocks on a worklet whose reply lands on the
+    // main queue, so embedding on the main thread deadlocks. Lexical-only indexing is
+    // the main-thread "freshness" path and MUST never invoke the (blocking) embed —
+    // the spy's embedCount staying at 0 is the deadlock-avoidance proof.
+    let spy = CountingEmbeddingProvider()
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: spy)
+    _ = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .lexicalOnly)))
+
+    try expect(spy.embedCount == 0, "lexical-only indexing must never invoke the blocking embed provider")
+}
+
+func embeddingBackfillUsesLexicalUntilEmbeddingIndexBuilt() throws {
+    // During first-run backfill the embedding index has not been built yet, so
+    // retrieval must serve from the lexical index meanwhile (the design's intent)
+    // instead of returning nothing. With only a lexicalOnly pass: a content-term
+    // query grounds (lexical hit), but the definitional phrasing — which a built
+    // embedding index WOULD match semantically — misses, because that index is not
+    // ready yet. This proves lexical serves while embeddings backfill.
+    let spy = CountingEmbeddingProvider()
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: spy)
+    let note = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtime.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .lexicalOnly)))
+
+    // Lexical hit: every content term appears in the note's searchable text.
+    let groundedResult = try runtime.answer(.init(prompt: "Project Zephyr Bluefin codename"))
+    try expect(groundedResult.mode == .noteGrounded, "lexical retrieval must ground the answer while the embedding index backfills")
+    try expect(groundedResult.citations == [
+        SourceCitation(noteID: note.id, noteFragmentID: "note-body")
+    ], "lexical fallback must cite the note whose searchable text contains all content terms")
+
+    // Lexical miss: "mean" is absent from the note. Because the embedding index is
+    // not ready, retrieval stays lexical and finds nothing (the semantic match that
+    // the built embedding index provides is not yet available).
+    try expectRuntimeError(.noRetrievedContext(.noteGrounded)) {
+        _ = try runtime.answer(.init(prompt: "What does Project Zephyr mean?"))
+    }
+}
+
+func embeddingBackfillEmbeddingOnlyIndexingEnablesSemanticRetrieval() throws {
+    // The app runs lexicalOnly inline (freshness) and then embeddingOnly off the main
+    // thread to backfill. After the embeddingOnly pass the embedding index is built —
+    // embedCount rises and the definitional phrasing, which shares no content term
+    // "mean" with the note, now grounds via semantic retrieval.
+    let spy = CountingEmbeddingProvider()
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: spy)
+    let note = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtime.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .lexicalOnly)))
+
+    try expect(spy.embedCount == 0, "lexicalOnly pass must not embed before the embeddingOnly pass runs")
+
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .embeddingOnly)))
+
+    try expect(spy.embedCount > 0, "embeddingOnly indexing must build the embedding index by embedding the notes")
+
+    let result = try runtime.answer(.init(prompt: "What does Project Zephyr mean?"))
+    try expect(result.mode == .noteGrounded, "once the embedding index is built, semantic retrieval must ground the definitional question")
+    try expect(result.citations == [
+        SourceCitation(noteID: note.id, noteFragmentID: "note-body")
+    ], "semantic retrieval must cite the Zephyr note after the embeddingOnly pass")
+}
+
+func embeddingBackfillEmbeddingOnlyDoesNotRebuildLexicalFreshness() throws {
+    // The scopes are independent: embeddingOnly must NOT establish lexical freshness.
+    // With only an embeddingOnly pass, the user-search index was never built, so an
+    // answer still fails the freshness check — confirming the app must run lexicalOnly
+    // (on the main thread) separately for freshness.
+    let spy = CountingEmbeddingProvider()
+    let runtime = RuntimeCoreHarness.makeInMemory(noteEmbeddingProvider: spy)
+    _ = try createdNote(from: runtime.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtime.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtime.execute(.runIndexingJobs(.init(scope: .embeddingOnly)))
+
+    try expectRuntimeError(.indexNotFresh(.userSearch)) {
+        _ = try runtime.answer(.init(prompt: "Project Zephyr"))
+    }
+}
+
 /// Spy embedding provider that counts `embed` calls so persistence tests can assert
 /// that unchanged notes are loaded from the store (zero embeds) rather than re-embedded.
 /// Delegates the actual vector to the deterministic `FakeEmbeddingProvider` so cosine
@@ -8175,6 +8282,10 @@ let tests: [(String, () async throws -> Void)] = [
     ("aiAvailabilityCheckFailsFastUntilUsableLocalModelProfileExists", aiAvailabilityCheckFailsFastUntilUsableLocalModelProfileExists),
     ("answerRequestDefaultsToNoteGroundedAndReturnsSourceCitations", answerRequestDefaultsToNoteGroundedAndReturnsSourceCitations),
     ("noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap", noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap),
+    ("embeddingBackfillLexicalOnlyIndexingDoesNotEmbed", embeddingBackfillLexicalOnlyIndexingDoesNotEmbed),
+    ("embeddingBackfillUsesLexicalUntilEmbeddingIndexBuilt", embeddingBackfillUsesLexicalUntilEmbeddingIndexBuilt),
+    ("embeddingBackfillEmbeddingOnlyIndexingEnablesSemanticRetrieval", embeddingBackfillEmbeddingOnlyIndexingEnablesSemanticRetrieval),
+    ("embeddingBackfillEmbeddingOnlyDoesNotRebuildLexicalFreshness", embeddingBackfillEmbeddingOnlyDoesNotRebuildLexicalFreshness),
     ("embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding", embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding),
     ("embeddingPersistenceReembedsNoteWhoseContentChanged", embeddingPersistenceReembedsNoteWhoseContentChanged),
     ("embeddingPersistenceReembedsWhenEmbeddingModelChanged", embeddingPersistenceReembedsWhenEmbeddingModelChanged),
