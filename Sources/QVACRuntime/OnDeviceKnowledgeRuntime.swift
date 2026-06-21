@@ -6,6 +6,7 @@ public final class OnDeviceKnowledgeRuntime {
     private let linkEngine: MarkdownLinkEngine
     private let userSearchIndex: UserSearchIndex
     private let noteEmbeddingProvider: (any NoteEmbeddingProvider)?
+    private let noteEmbeddingStore: (any NoteEmbeddingStore)?
     private let noteEmbeddingIndex = NoteEmbeddingIndex()
     private static let embeddingSearchTopK = 5
     private static let embeddingSearchThreshold: Float = 0.25
@@ -18,12 +19,13 @@ public final class OnDeviceKnowledgeRuntime {
     private var aiEditingPermissionsBySessionID: [AISessionID: AIEditingPermission] = [:]
     private var aiProgressState: AIProgressState = .idle
 
-    init(noteStore: NoteStore, graphStore: any GraphStore, linkEngine: MarkdownLinkEngine, userSearchIndex: UserSearchIndex, noteEmbeddingProvider: (any NoteEmbeddingProvider)? = nil, modelInventory: ModelInventoryStore, aiRuntimeAdapter: any AIRuntimeAdapter, aiSessionHistoryStore: AISessionHistoryStore, savedAIResponseStore: SavedAIResponseStore, aiOperationStore: AIOperationStore, clock: @escaping () -> Date = Date.init) {
+    init(noteStore: NoteStore, graphStore: any GraphStore, linkEngine: MarkdownLinkEngine, userSearchIndex: UserSearchIndex, noteEmbeddingProvider: (any NoteEmbeddingProvider)? = nil, noteEmbeddingStore: (any NoteEmbeddingStore)? = nil, modelInventory: ModelInventoryStore, aiRuntimeAdapter: any AIRuntimeAdapter, aiSessionHistoryStore: AISessionHistoryStore, savedAIResponseStore: SavedAIResponseStore, aiOperationStore: AIOperationStore, clock: @escaping () -> Date = Date.init) {
         self.noteStore = noteStore
         self.graphStore = graphStore
         self.linkEngine = linkEngine
         self.userSearchIndex = userSearchIndex
         self.noteEmbeddingProvider = noteEmbeddingProvider
+        self.noteEmbeddingStore = noteEmbeddingStore
         self.modelInventory = modelInventory
         self.aiRuntimeAdapter = aiRuntimeAdapter
         self.aiSessionHistoryStore = aiSessionHistoryStore
@@ -114,7 +116,12 @@ public final class OnDeviceKnowledgeRuntime {
             let notes = try noteStore.listNotes()
             userSearchIndex.rebuild(from: notes)
             if let noteEmbeddingProvider {
-                try noteEmbeddingIndex.rebuild(from: notes, provider: noteEmbeddingProvider)
+                try noteEmbeddingIndex.rebuild(
+                    from: notes,
+                    provider: noteEmbeddingProvider,
+                    store: noteEmbeddingStore,
+                    modelID: noteEmbeddingProvider.modelID
+                )
             }
             return .ranIndexingJobs
         case .importMarkdownFile(let command):

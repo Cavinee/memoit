@@ -6,6 +6,10 @@ import Foundation
 /// worklet call is bridged off the main thread at the adapter boundary, exactly like
 /// `AIRuntimeAdapter` for generation.
 public protocol NoteEmbeddingProvider {
+    /// Stable identifier for the embedding model behind this provider. Persisted
+    /// alongside each stored vector so that switching models invalidates stale
+    /// vectors (a stored `modelID` different from the current one ⇒ re-embed).
+    var modelID: String { get }
     func embed(_ text: String) throws -> [Float]
 }
 
@@ -16,9 +20,11 @@ public protocol NoteEmbeddingProvider {
 /// across runs. The real semantic quality is verified on-device with EmbeddingGemma.
 public struct FakeEmbeddingProvider: NoteEmbeddingProvider {
     private let dimensions: Int
+    public let modelID: String
 
-    public init(dimensions: Int = 512) {
+    public init(dimensions: Int = 512, modelID: String = "fake-embedding-v1") {
         self.dimensions = dimensions
+        self.modelID = modelID
     }
 
     public func embed(_ text: String) throws -> [Float] {

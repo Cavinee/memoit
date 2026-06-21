@@ -14,10 +14,61 @@ final class NoteEmbeddingIndex {
     private var records: [Record] = []
 
     func rebuild(from notes: [Note], provider: NoteEmbeddingProvider) throws {
-        records = try notes.map { note in
-            let vector = try provider.embed("\(note.title)\n\(note.body)")
-            return Record(noteID: note.id, vector: vector, norm: Self.norm(vector))
+        try rebuild(from: notes, provider: provider, store: nil, modelID: provider.modelID)
+    }
+
+    /// Rebuilds the in-memory index. With `store == nil` every note is embedded (the
+    /// in-memory path). With a `store`, an unchanged note (matching `modelID` AND
+    /// `contentHash`) reuses its persisted vector instead of re-embedding; new/changed
+    /// notes are embedded and upserted; rows for notes no longer present are dropped.
+    func rebuild(from notes: [Note], provider: NoteEmbeddingProvider, store: (any NoteEmbeddingStore)?, modelID: String) throws {
+        guard let store else {
+            records = try notes.map { note in
+                let vector = try provider.embed(Self.embeddingInput(for: note))
+                return Record(noteID: note.id, vector: vector, norm: Self.norm(vector))
+            }
+            return
         }
+
+        let stored = try store.loadAll()
+        var newRecords: [Record] = []
+        newRecords.reserveCapacity(notes.count)
+
+        for note in notes {
+            let contentHash = Self.contentHash(for: note)
+            let vector: [Float]
+            if let existing = stored[note.id], existing.modelID == modelID, existing.contentHash == contentHash {
+                vector = existing.vector
+            } else {
+                vector = try provider.embed(Self.embeddingInput(for: note))
+                try store.upsert(StoredNoteEmbedding(
+                    noteID: note.id,
+                    modelID: modelID,
+                    contentHash: contentHash,
+                    vector: vector
+                ))
+            }
+            newRecords.append(Record(noteID: note.id, vector: vector, norm: Self.norm(vector)))
+        }
+
+        try store.deleteAll(exceptNoteIDs: Set(notes.map(\.id)))
+        records = newRecords
+    }
+
+    private static func embeddingInput(for note: Note) -> String {
+        "\(note.title)\n\(note.body)"
+    }
+
+    /// Stable, process-independent FNV-1a hash of the embedded content. A mismatch with
+    /// the stored hash means the note's title/body changed and it must be re-embedded.
+    /// Deliberately NOT Swift's `Hasher` (per-process seeded → never stable across runs).
+    private static func contentHash(for note: Note) -> String {
+        var hash: UInt64 = 1469598103934665603 // FNV-1a 64-bit offset basis
+        for byte in embeddingInput(for: note).utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 1099511628211 // FNV-1a 64-bit prime
+        }
+        return String(hash, radix: 16)
     }
 
     /// Note IDs whose embedding cosine-similarity to `queryVector` is at least

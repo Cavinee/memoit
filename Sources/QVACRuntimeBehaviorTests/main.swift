@@ -4652,6 +4652,177 @@ func noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap() throws 
     ], "semantic match should cite the Zephyr Note")
 }
 
+/// Spy embedding provider that counts `embed` calls so persistence tests can assert
+/// that unchanged notes are loaded from the store (zero embeds) rather than re-embedded.
+/// Delegates the actual vector to the deterministic `FakeEmbeddingProvider` so cosine
+/// search still behaves, and exposes a configurable `modelID` for model-change tests.
+final class CountingEmbeddingProvider: NoteEmbeddingProvider {
+    private let base: FakeEmbeddingProvider
+    let modelID: String
+    private(set) var embedCount = 0
+
+    init(dimensions: Int = 512, modelID: String = "fake-embedding-v1") {
+        self.base = FakeEmbeddingProvider(dimensions: dimensions)
+        self.modelID = modelID
+    }
+
+    func embed(_ text: String) throws -> [Float] {
+        embedCount += 1
+        return try base.embed(text)
+    }
+}
+
+func embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding() throws {
+    let storageURL = temporarySQLiteStorageURL()
+    defer { try? FileManager.default.removeItem(at: storageURL) }
+
+    let spyA = CountingEmbeddingProvider()
+    let runtimeA = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyA)
+    _ = try createdNote(from: runtimeA.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtimeA.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeA.execute(.runIndexingJobs(.init()))
+
+    try expect(spyA.embedCount == 1, "first indexing run should embed the single note exactly once")
+
+    let spyB = CountingEmbeddingProvider()
+    let runtimeB = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyB)
+    _ = try runtimeB.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeB.execute(.runIndexingJobs(.init()))
+
+    try expect(spyB.embedCount == 0, "unchanged note should load its persisted vector instead of re-embedding")
+
+    let result = try runtimeB.answer(.init(prompt: "What does Project Zephyr mean?"))
+
+    try expect(result.mode == .noteGrounded, "persisted vector should still drive semantic retrieval to a note-grounded answer")
+    try expect(result.citations.contains(where: { $0.noteFragmentID == "note-body" }), "reloaded vector should cite the Zephyr note")
+}
+
+func embeddingPersistenceReembedsNoteWhoseContentChanged() throws {
+    let storageURL = temporarySQLiteStorageURL()
+    defer { try? FileManager.default.removeItem(at: storageURL) }
+
+    let spyA = CountingEmbeddingProvider()
+    let runtimeA = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyA)
+    let note = try createdNote(from: runtimeA.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtimeA.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeA.execute(.runIndexingJobs(.init()))
+    _ = try updatedNote(from: runtimeA.execute(.updateNoteBody(.init(
+        noteID: note.id,
+        body: "Project Zephyr now ships on April 30, 2027 under codename Bluefin."
+    ))))
+
+    let spyB = CountingEmbeddingProvider()
+    let runtimeB = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyB)
+    _ = try runtimeB.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeB.execute(.runIndexingJobs(.init()))
+
+    try expect(spyB.embedCount == 1, "a note whose content changed must be re-embedded, not loaded from the stale stored vector")
+}
+
+func embeddingPersistenceReembedsWhenEmbeddingModelChanged() throws {
+    let storageURL = temporarySQLiteStorageURL()
+    defer { try? FileManager.default.removeItem(at: storageURL) }
+
+    let spyA = CountingEmbeddingProvider(modelID: "model-1")
+    let runtimeA = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyA)
+    _ = try createdNote(from: runtimeA.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtimeA.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeA.execute(.runIndexingJobs(.init()))
+
+    let spyB = CountingEmbeddingProvider(modelID: "model-2")
+    let runtimeB = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyB)
+    _ = try runtimeB.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeB.execute(.runIndexingJobs(.init()))
+
+    try expect(spyB.embedCount == 1, "a changed embedding model must invalidate the stored vector and re-embed, not load it")
+}
+
+func embeddingPersistenceDropsTrashedNoteRowAndDoesNotReembedSurvivor() throws {
+    let storageURL = temporarySQLiteStorageURL()
+    defer { try? FileManager.default.removeItem(at: storageURL) }
+
+    let spyA = CountingEmbeddingProvider()
+    let runtimeA = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyA)
+    let survivor = try createdNote(from: runtimeA.execute(.createNote(.init(
+        title: "Zephyr Launch",
+        body: "Project Zephyr ships on March 14, 2027. The release codename is Bluefin.",
+        creationProvenance: .userCreated
+    ))))
+    let doomed = try createdNote(from: runtimeA.execute(.createNote(.init(
+        title: "Helios Roadmap",
+        body: "Helios prototype undergoes thermal vacuum qualification next quarter.",
+        creationProvenance: .userCreated
+    ))))
+    _ = try runtimeA.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeA.execute(.runIndexingJobs(.init()))
+    _ = try movedNoteToTrash(from: runtimeA.execute(.moveNoteToTrash(.init(noteID: doomed.id)))).0
+    _ = try runtimeA.execute(.runIndexingJobs(.init()))
+
+    let spyB = CountingEmbeddingProvider()
+    let runtimeB = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyB)
+    _ = try runtimeB.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeB.execute(.runIndexingJobs(.init()))
+
+    try expect(spyB.embedCount == 0, "the surviving note's stored vector should still load without re-embedding after a sibling is trashed")
+
+    let survivorResult = try runtimeB.answer(.init(prompt: "What does Project Zephyr mean?"))
+    try expect(survivorResult.citations.contains(where: { $0.noteID == survivor.id }), "surviving note should still be retrievable from its persisted vector")
+
+    try expectRuntimeError(.noRetrievedContext(.noteGrounded)) {
+        _ = try runtimeB.answer(.init(prompt: "Helios thermal vacuum qualification prototype"))
+    }
+
+    // The trashed note's stored row must actually be dropped, not merely hidden by
+    // listNotes()'s trash exclusion: restoring it with unchanged content forces a
+    // fresh embed (the persisted vector is gone), observable through embedCount.
+    _ = try runtimeB.execute(.restoreNoteFromTrash(.init(noteID: doomed.id)))
+    let spyC = CountingEmbeddingProvider()
+    let runtimeC = try RuntimeCoreHarness.makeSQLiteBacked(storageURL: storageURL, noteEmbeddingProvider: spyC)
+    _ = try runtimeC.execute(.recordLocalModelProfile(.init(profile: .init(
+        id: .init("model-a"),
+        name: "QVAC Tiny"
+    ))))
+    _ = try runtimeC.execute(.runIndexingJobs(.init()))
+
+    try expect(spyC.embedCount == 1, "restoring a previously-trashed note must re-embed it because its stored row was dropped")
+}
+
 func semanticRetrievalFallsBackToGeneralWhenNonsenseQuerySharesNoTokensWithAnyNote() throws {
     // With an embedding provider injected, a prompt whose tokens share no index
     // slot with any note stays below the 0.25 cosine threshold → no seeds →
@@ -8004,6 +8175,10 @@ let tests: [(String, () async throws -> Void)] = [
     ("aiAvailabilityCheckFailsFastUntilUsableLocalModelProfileExists", aiAvailabilityCheckFailsFastUntilUsableLocalModelProfileExists),
     ("answerRequestDefaultsToNoteGroundedAndReturnsSourceCitations", answerRequestDefaultsToNoteGroundedAndReturnsSourceCitations),
     ("noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap", noteGroundedRetrievalMatchesSemanticallyWhenNoContentTermsOverlap),
+    ("embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding", embeddingPersistenceReusesStoredVectorOnReloadWithoutReembedding),
+    ("embeddingPersistenceReembedsNoteWhoseContentChanged", embeddingPersistenceReembedsNoteWhoseContentChanged),
+    ("embeddingPersistenceReembedsWhenEmbeddingModelChanged", embeddingPersistenceReembedsWhenEmbeddingModelChanged),
+    ("embeddingPersistenceDropsTrashedNoteRowAndDoesNotReembedSurvivor", embeddingPersistenceDropsTrashedNoteRowAndDoesNotReembedSurvivor),
     ("semanticRetrievalFallsBackToGeneralWhenNonsenseQuerySharesNoTokensWithAnyNote", semanticRetrievalFallsBackToGeneralWhenNonsenseQuerySharesNoTokensWithAnyNote),
     ("semanticRetrievalRanksNotesMostSimilarFirstAndExcludesZeroSimilarityNote", semanticRetrievalRanksNotesMostSimilarFirstAndExcludesZeroSimilarityNote),
     ("semanticRetrievalCapsResultsAtTopKAndExcludesLeastSimilarNote", semanticRetrievalCapsResultsAtTopKAndExcludesLeastSimilarNote),

@@ -17,7 +17,7 @@ public enum RuntimeCoreHarness {
         )
     }
 
-    public static func makeSQLiteBacked(storageURL: URL, aiRuntimeAdapter: any AIRuntimeAdapter = FakeAIRuntimeAdapter(), clock: @escaping () -> Date = Date.init) throws -> OnDeviceKnowledgeRuntime {
+    public static func makeSQLiteBacked(storageURL: URL, aiRuntimeAdapter: any AIRuntimeAdapter = FakeAIRuntimeAdapter(), noteEmbeddingProvider: (any NoteEmbeddingProvider)? = nil, clock: @escaping () -> Date = Date.init) throws -> OnDeviceKnowledgeRuntime {
         let noteStore = try SQLiteNoteStore(storageURL: storageURL, clock: clock)
         let graphStore = try SQLiteGraphStore(storageURL: storageURL)
         if try graphStore.isEmpty() {
@@ -25,12 +25,15 @@ public enum RuntimeCoreHarness {
         }
         let userSearchIndex = UserSearchIndex()
         userSearchIndex.rebuild(from: try noteStore.listNotes())
+        let noteEmbeddingStore = try noteEmbeddingProvider.map { _ in try SQLiteNoteEmbeddingStore(storageURL: storageURL) }
 
         return OnDeviceKnowledgeRuntime(
             noteStore: noteStore,
             graphStore: graphStore,
             linkEngine: MarkdownLinkEngine(),
             userSearchIndex: userSearchIndex,
+            noteEmbeddingProvider: noteEmbeddingProvider,
+            noteEmbeddingStore: noteEmbeddingStore,
             modelInventory: ModelInventoryStore(),
             aiRuntimeAdapter: aiRuntimeAdapter,
             aiSessionHistoryStore: AISessionHistoryStore(),
