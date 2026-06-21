@@ -42,10 +42,10 @@ expect(
 
 const appJSON = readJSON("app.json");
 const expo = appJSON.expo ?? {};
-expect(expo.slug === "qvac2026", "app.json must describe the production qvac2026 Expo host");
+expect(expo.slug === "memoit", "app.json must describe the production MemoIt Expo host");
 expect(expo.newArchEnabled === true, "app.json must enable the Expo/RN new architecture");
 expect(
-  expo.ios?.bundleIdentifier === "com.Nullabs.qvac2026",
+  expo.ios?.bundleIdentifier === "com.nullabs.memoit",
   "app.json must use the production iOS bundle identifier",
 );
 expect(

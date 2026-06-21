@@ -1,4 +1,4 @@
-# QVAC — On‑Device AI Notes (iOS)
+# MemoIt — On‑Device AI Notes (iOS)
 
 A privacy‑first notes app where **all AI runs on‑device** via the QVAC SDK — no cloud, no
 data leaving the phone. It includes notes with rich text, semantic (embedding‑based)
@@ -71,7 +71,7 @@ so your team ID never gets committed.
 4. In the **`qvac2026`** target → **Signing & Capabilities**, confirm *Automatically manage
    signing* and your Team is selected.
    - Using a **free** Apple ID? Also set a unique **Bundle Identifier** (e.g.
-     `com.yourname.qvac2026`) so Xcode can provision it.
+     `com.yourname.memoit`) so Xcode can provision it.
 5. Press **Run (⌘R)**. Xcode builds, installs, and launches the app on the device.
 6. **First launch** initializes the on‑device model through the QVAC SDK. This can take a
    moment and may need internet **the first time** to fetch the model; after that the app
@@ -102,7 +102,7 @@ xcodebuild \
 xcrun devicectl device install app --device <DEVICE_UDID> \
   build/DerivedData/Build/Products/Debug-iphoneos/qvac2026.app
 
-xcrun devicectl device process launch --device <DEVICE_UDID> com.Nullabs.qvac2026
+xcrun devicectl device process launch --device <DEVICE_UDID> com.nullabs.memoit
 ```
 
 ---

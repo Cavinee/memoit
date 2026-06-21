@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "QVAC",
-    "slug": "qvac2026",
+    "name": "MemoIt",
+    "slug": "memoit",
     "version": "0.1.0",
     "orientation": "portrait",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "com.Nullabs.qvac2026",
+      "bundleIdentifier": "com.nullabs.memoit",
       "deploymentTarget": "17.0",
       "supportsTablet": true,
       "infoPlist": {

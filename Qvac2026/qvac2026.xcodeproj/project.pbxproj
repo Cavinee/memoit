@@ -428,9 +428,10 @@
 				DEVELOPMENT_TEAM = GYQ2BB2K9H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "qvac uses the camera to attach photos to your notes.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "qvac uses the microphone to record voice notes.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "qvac saves images to your photo library.";
+				INFOPLIST_KEY_CFBundleDisplayName = MemoIt;
+				INFOPLIST_KEY_NSCameraUsageDescription = "MemoIt uses the camera to attach photos to your notes.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MemoIt uses the microphone to record voice notes.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MemoIt saves images to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -442,7 +443,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.Nullabs.qvac2026;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nullabs.memoit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -465,9 +466,10 @@
 				DEVELOPMENT_TEAM = GYQ2BB2K9H;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "qvac uses the camera to attach photos to your notes.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "qvac uses the microphone to record voice notes.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "qvac saves images to your photo library.";
+				INFOPLIST_KEY_CFBundleDisplayName = MemoIt;
+				INFOPLIST_KEY_NSCameraUsageDescription = "MemoIt uses the camera to attach photos to your notes.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MemoIt uses the microphone to record voice notes.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MemoIt saves images to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -479,7 +481,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.Nullabs.qvac2026;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nullabs.memoit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
